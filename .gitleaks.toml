@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+title = "Gitleaks configuration for Hivemind Receipts OSS"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "RFC 9052 public COSE_Key and RFC 3161 conformance test vectors (public coordinates and DER timestamps only, no private keys)"
+paths = [
+  '''(^|/)(vectors|testdata|tests/vectors)/.*\.json$''',
+]

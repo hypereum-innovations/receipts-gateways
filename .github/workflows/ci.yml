@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CI & SLSA Provenance (receipts-gateways)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  verify-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (SHA-pinned)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Setup Node.js (SHA-pinned)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+
+      - name: Zero-Internal-Leakage & Secret Gate
+        run: |
+          if grep -rnE "server\.ts|registration\.ts|decision-point\.ts|cedar-engine\.ts|tenancy\.ts|AKIA[0-9A-Z]{16}" . --exclude-dir=.git --exclude=ci.yml; then
+            echo "Forbidden closed-source reference or secret detected"
+            exit 1
+          fi
+
+      - name: Verify SPDX & Legal Contour
+        run: |
+          for f in LICENSE NOTICE SECURITY.md CONTRIBUTING.md TRADEMARK.md; do
+            test -s "$f" || (echo "Missing $f" && exit 1)
+          done
+
+      - name: Generate Release Digest for Provenance
+        if: github.event_name == 'push'
+        run: |
+          find . -maxdepth 3 -type f ! -path './.git/*' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+      - name: Attest SLSA Build Provenance (Sigstore)
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c
+        with:
+          subject-path: 'SHA256SUMS'

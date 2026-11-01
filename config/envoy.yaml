@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# Envoy-fronted MCP/A2A/model traffic:
+#  - ext_authz calls the Hivemind decision point before the request is proxied
+#    (denied actions never reach the tool; the refusal still gets a receipt).
+#  - The capture service (ext_proc in the full deployment, see RUNBOOK) reads
+#    request/response bodies to build capsules; this file wires the decision
+#    leg, which is the enforcement point that must fail closed.
+static_resources:
+  listeners:
+    - name: agent_gateway
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: receipts_gateway
+                route_config:
+                  name: tools
+                  virtual_hosts:
+                    - name: tools
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: mcp_upstream }
+                http_filters:
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      failure_mode_allow: false # fail closed: no decision, no tool call
+                      with_request_body:
+                        max_request_bytes: 1048576
+                        allow_partial_message: false
+                      http_service:
+                        server_uri:
+                          uri: receipts-service:8787
+                          cluster: receipts_service
+                          timeout: 2s
+                        path_prefix: /ext_authz/check
+                        authorization_request:
+                          headers_to_add:
+                            - { key: x-hivemind-surface, value: envoy }
+                        authorization_response:
+                          allowed_upstream_headers:
+                            patterns:
+                              - exact: x-hivemind-decision
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: mcp_upstream
+      connect_timeout: 5s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: mcp_upstream
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: mcp-server, port_value: 9000 } } }
+    - name: receipts_service
+      connect_timeout: 2s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: receipts_service
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: receipts-service, port_value: 8787 } } }

@@ -1,3 +1,5 @@
+> **Retired preview, not maintained.**
+
 # `receipts-gateways`
 
 SPDX-License-Identifier: Apache-2.0
